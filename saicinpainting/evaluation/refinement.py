@@ -12,9 +12,75 @@ from saicinpainting.evaluation.data import pad_tensor_to_modulo
 from saicinpainting.evaluation.utils import move_to_device
 from saicinpainting.training.modules.ffc import FFCResnetBlock
 from saicinpainting.training.modules.pix2pixhd import ResnetBlock
-
+from torch.utils.checkpoint import checkpoint
 from tqdm import tqdm
 
+
+def checkpoint_sequential(functions, segments, input, **kwargs):
+    r"""A helper function for checkpointing sequential models.
+
+    Sequential models execute a list of modules/functions in order
+    (sequentially). Therefore, we can divide such a model in various segments
+    and checkpoint each segment. All segments except the last will run in
+    :func:`torch.no_grad` manner, i.e., not storing the intermediate
+    activations. The inputs of each checkpointed segment will be saved for
+    re-running the segment in the backward pass.
+
+    See :func:`~torch.utils.checkpoint.checkpoint` on how checkpointing works.
+
+    .. warning::
+        Checkpointing currently only supports :func:`torch.autograd.backward`
+        and only if its `inputs` argument is not passed. :func:`torch.autograd.grad`
+        is not supported.
+
+    .. warning:
+        At least one of the inputs needs to have :code:`requires_grad=True` if
+        grads are needed for model inputs, otherwise the checkpointed part of the
+        model won't have gradients.
+
+    .. warning:
+        Since PyTorch 1.4, it allows only one Tensor as the input and
+        intermediate outputs, just like :class:`torch.nn.Sequential`.
+
+    Args:
+        functions: A :class:`torch.nn.Sequential` or the list of modules or
+            functions (comprising the model) to run sequentially.
+        segments: Number of chunks to create in the model
+        input: A Tensor that is input to :attr:`functions`
+        preserve_rng_state(bool, optional, default=True):  Omit stashing and restoring
+            the RNG state during each checkpoint.
+
+    Returns:
+        Output of running :attr:`functions` sequentially on :attr:`*inputs`
+
+    Example:
+        >>> model = nn.Sequential(...)
+        >>> input_var = checkpoint_sequential(model, chunks, input_var)
+    """
+    # Hack for keyword-only parameter in a python 2.7-compliant way
+    preserve = kwargs.pop('preserve_rng_state', True)
+    use_reentrant = False # kwargs.pop('use_reentrant', True)
+    if kwargs:
+        raise ValueError("Unexpected keyword arguments: " + ",".join(arg for arg in kwargs))
+
+    def run_function(start, end, functions):
+        def forward(input):
+            for j in range(start, end + 1):
+                input = functions[j](input)
+            return input
+        return forward
+
+    if isinstance(functions, torch.nn.Sequential):
+        functions = list(functions.children())
+
+    segment_size = len(functions) // segments
+    # the last chunk has to be non-volatile
+    end = -1
+    for start in range(0, segment_size * (segments - 1), segment_size):
+        end = start + segment_size - 1
+        input = checkpoint(run_function(start, end, functions), input,
+                           preserve_rng_state=preserve, use_reentrant=use_reentrant)
+    return run_function(end + 1, len(functions) - 1, functions)(input)
 
 def _pyrdown(im : torch.Tensor, downsize : tuple=None):
     """downscale the image"""
@@ -87,7 +153,7 @@ def _infer(
     image : torch.Tensor, mask : torch.Tensor, 
     forward_front : nn.Module, forward_rears : nn.Module, 
     ref_lower_res : torch.Tensor, orig_shape : tuple, devices : list, 
-    scale_ind : int, n_iters : int=15, lr : float=0.002):
+    scale_ind : int, n_iters : int=15, lr : float=0.002, nsegs : int=9):
     """Performs inference with refinement at a given scale.
 
     Parameters
@@ -112,7 +178,8 @@ def _infer(
         number of iterations of refinement, by default 15
     lr : float, optional
         learning rate, by default 0.002
-
+    nsegs : int, optional
+        number of segments 
     Returns
     -------
     torch.Tensor
@@ -126,6 +193,7 @@ def _infer(
         ref_lower_res = ref_lower_res.detach()
     with torch.no_grad():
         z1,z2 = forward_front(masked_image)
+        # z1,z2 = checkpoint_sequential(forward_front, nsegs, masked_image)
     # Inference
     mask = mask.to(devices[-1])
     ekernel = torch.from_numpy(cv2.getStructuringElement(cv2.MORPH_ELLIPSE,(15,15)).astype(bool)).float()
@@ -141,7 +209,8 @@ def _infer(
         optimizer.zero_grad()
         input_feat = (z1,z2)
         for idd, forward_rear in enumerate(forward_rears):
-            output_feat = forward_rear(input_feat)
+            import pdb; pdb.set_trace()
+            output_feat = checkpoint_sequential(forward_rear, nsegs, input_feat)
             if idd < len(devices) - 1:
                 midz1, midz2 = output_feat
                 midz1, midz2 = midz1.to(devices[idd+1]), midz2.to(devices[idd+1])
@@ -258,7 +327,6 @@ def refine_predict(
     torch.Tensor
         inpainted image of size (1,3,H,W)
     """
-
     assert not inpainter.training
     assert not inpainter.add_noise_kwargs
     assert inpainter.concat_mask

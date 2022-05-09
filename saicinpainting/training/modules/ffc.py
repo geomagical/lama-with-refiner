@@ -204,8 +204,10 @@ class FFC(nn.Module):
 
     def forward(self, x):
         x_l, x_g = x if type(x) is tuple else (x, 0)
-        out_xl, out_xg = 0, 0
-
+        out_xl, out_xg = x_l.new_tensor(0.), x_l.new_tensor(0.)
+        out_xl.requires_grad = True
+        out_xg.required_grad = True
+        # import pdb; pdb.set_trace()
         if self.gated:
             total_input_parts = [x_l]
             if torch.is_tensor(x_g):
@@ -215,13 +217,14 @@ class FFC(nn.Module):
             gates = torch.sigmoid(self.gate(total_input))
             g2l_gate, l2g_gate = gates.chunk(2, dim=1)
         else:
-            g2l_gate, l2g_gate = 1, 1
+            g2l_gate, l2g_gate = x_l.new_tensor(1.), x_l.new_tensor(1.)
+            g2l_gate.requires_grad = True
+            l2g_gate.requires_grad = True
 
         if self.ratio_gout != 1:
             out_xl = self.convl2l(x_l) + self.convg2l(x_g) * g2l_gate
         if self.ratio_gout != 0:
             out_xg = self.convl2g(x_l) * l2g_gate + self.convg2g(x_g)
-
         return out_xl, out_xg
 
 

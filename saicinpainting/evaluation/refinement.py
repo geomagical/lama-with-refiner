@@ -12,7 +12,7 @@ from saicinpainting.evaluation.data import pad_tensor_to_modulo
 from saicinpainting.evaluation.utils import move_to_device
 from saicinpainting.training.modules.ffc import FFCResnetBlock
 from saicinpainting.training.modules.pix2pixhd import ResnetBlock
-
+from torch.cuda.amp import autocast, GradScaler 
 from tqdm import tqdm
 
 
@@ -125,7 +125,8 @@ def _infer(
     if ref_lower_res is not None:
         ref_lower_res = ref_lower_res.detach()
     with torch.no_grad():
-        z1,z2 = forward_front(masked_image)
+        with autocast():
+            z1,z2 = forward_front(masked_image)
     # Inference
     mask = mask.to(devices[-1])
     ekernel = torch.from_numpy(cv2.getStructuringElement(cv2.MORPH_ELLIPSE,(15,15)).astype(bool)).float()
@@ -135,39 +136,42 @@ def _infer(
     z1.requires_grad, z2.requires_grad = True, True
 
     optimizer = Adam([z1,z2], lr=lr)
+    scaler = GradScaler()
 
     pbar = tqdm(range(n_iters), leave=False)
     for idi in pbar:
         optimizer.zero_grad()
         input_feat = (z1,z2)
-        for idd, forward_rear in enumerate(forward_rears):
-            output_feat = forward_rear(input_feat)
-            if idd < len(devices) - 1:
-                midz1, midz2 = output_feat
-                midz1, midz2 = midz1.to(devices[idd+1]), midz2.to(devices[idd+1])
-                input_feat = (midz1, midz2)
-            else:        
-                pred = output_feat
+        with autocast():
+            for idd, forward_rear in enumerate(forward_rears):
+                output_feat = forward_rear(input_feat)
+                if idd < len(devices) - 1:
+                    midz1, midz2 = output_feat
+                    midz1, midz2 = midz1.to(devices[idd+1]), midz2.to(devices[idd+1])
+                    input_feat = (midz1, midz2)
+                else:        
+                    pred = output_feat
 
-        if ref_lower_res is None:
-            break
-        losses = {}
-        ######################### multi-scale #############################
-        # scaled loss with downsampler
-        pred_downscaled = _pyrdown(pred[:,:,:orig_shape[0],:orig_shape[1]])
-        mask_downscaled = _pyrdown_mask(mask[:,:1,:orig_shape[0],:orig_shape[1]], blur_mask=False, round_up=False)
-        mask_downscaled = _erode_mask(mask_downscaled, ekernel=ekernel)
-        mask_downscaled = mask_downscaled.repeat(1,3,1,1)
-        losses["ms_l1"] = _l1_loss(pred, pred_downscaled, ref_lower_res, mask, mask_downscaled, image, on_pred=True)
+            if ref_lower_res is None:
+                break
+            losses = {}
+            ######################### multi-scale #############################
+            # scaled loss with downsampler
+            pred_downscaled = _pyrdown(pred[:,:,:orig_shape[0],:orig_shape[1]])
+            mask_downscaled = _pyrdown_mask(mask[:,:1,:orig_shape[0],:orig_shape[1]], blur_mask=False, round_up=False)
+            mask_downscaled = _erode_mask(mask_downscaled, ekernel=ekernel)
+            mask_downscaled = mask_downscaled.repeat(1,3,1,1)
+            losses["ms_l1"] = _l1_loss(pred, pred_downscaled, ref_lower_res, mask, mask_downscaled, image, on_pred=True)
 
-        loss = sum(losses.values())
+            loss = sum(losses.values())
         pbar.set_description("Refining scale {} using scale {} ...current loss: {:.4f}".format(scale_ind+1, scale_ind, loss.item()))
         if idi < n_iters - 1:
-            loss.backward()
-            optimizer.step()
+            scaler.scale(loss).backward()
+            scaler.step(optimizer)
             del pred_downscaled
             del loss
             del pred
+            scaler.update()
     # "pred" is the prediction after Plug-n-Play module
     inpainted = mask * pred + (1 - mask) * image
     inpainted = inpainted.detach().cpu()

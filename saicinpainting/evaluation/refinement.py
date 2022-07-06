@@ -118,31 +118,33 @@ def _infer(
     torch.Tensor
         inpainted image
     """
-    masked_image = image * (1 - mask)
-    masked_image = torch.cat([masked_image, mask], dim=1)
+    with autocast():
 
-    mask = mask.repeat(1,3,1,1)
-    if ref_lower_res is not None:
-        ref_lower_res = ref_lower_res.detach()
-    with torch.no_grad():
-        with autocast():
-            z1,z2 = forward_front(masked_image)
-    # Inference
-    mask = mask.to(devices[-1])
-    ekernel = torch.from_numpy(cv2.getStructuringElement(cv2.MORPH_ELLIPSE,(15,15)).astype(bool)).float()
-    ekernel = ekernel.to(devices[-1])
-    image = image.to(devices[-1])
-    z1, z2 = z1.detach().to(devices[0]), z2.detach().to(devices[0])
-    z1.requires_grad, z2.requires_grad = True, True
+        masked_image = image * (1 - mask)
+        masked_image = torch.cat([masked_image, mask], dim=1)
 
-    optimizer = Adam([z1,z2], lr=lr)
+        mask = mask.repeat(1,3,1,1)
+        if ref_lower_res is not None:
+            ref_lower_res = ref_lower_res.detach()
+        with torch.no_grad():
+            with autocast():
+                z1,z2 = forward_front(masked_image)
+        # Inference
+        mask = mask.to(devices[-1])
+        ekernel = torch.from_numpy(cv2.getStructuringElement(cv2.MORPH_ELLIPSE,(15,15)).astype(bool)).float()
+        ekernel = ekernel.to(devices[-1])
+        image = image.to(devices[-1])
+        z1, z2 = z1.detach().to(devices[0]), z2.detach().to(devices[0])
+        z1.requires_grad, z2.requires_grad = True, True
+
+        optimizer = Adam([z1,z2], lr=lr)
     scaler = GradScaler()
 
     pbar = tqdm(range(n_iters), leave=False)
     for idi in pbar:
-        optimizer.zero_grad()
-        input_feat = (z1,z2)
         with autocast():
+            optimizer.zero_grad()
+            input_feat = (z1,z2)
             for idd, forward_rear in enumerate(forward_rears):
                 output_feat = forward_rear(input_feat)
                 if idd < len(devices) - 1:
@@ -168,10 +170,10 @@ def _infer(
         if idi < n_iters - 1:
             scaler.scale(loss).backward()
             scaler.step(optimizer)
+            scaler.update()
             del pred_downscaled
             del loss
             del pred
-            scaler.update()
     # "pred" is the prediction after Plug-n-Play module
     inpainted = mask * pred + (1 - mask) * image
     inpainted = inpainted.detach().cpu()

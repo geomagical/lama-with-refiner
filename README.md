@@ -39,6 +39,7 @@ LaMa generalizes surprisingly well to much higher resolutions (~2k❗️) than i
 - Telegram bot [@MagicEraserBot](https://t.me/MagicEraserBot) by [@Moldoteck](https://github.com/Moldoteck), [code](https://github.com/Moldoteck/MagicEraser)
 - [Auto-LaMa](https://github.com/andy971022/auto-lama) = DE:TR object detection + LaMa inpainting by [@andy971022](https://github.com/andy971022)
 - [LAMA-Magic-Eraser-Local](https://github.com/zhaoyun0071/LAMA-Magic-Eraser-Local) = a standalone inpainting application built with PyQt5 by [@zhaoyun0071](https://github.com/zhaoyun0071)
+- [Hama](https://www.hama.app/) - object removal with a smart brush which simplifies mask drawing.
 
 # Environment setup
 
@@ -80,7 +81,7 @@ There are three options of an environment:
 Run
 ```
 cd lama
-export TORCH_HOME=$(pwd) && export PYTHONPATH=.
+export TORCH_HOME=$(pwd) && export PYTHONPATH=$(pwd)
 ```
 
 **1. Download pre-trained models**
@@ -160,7 +161,7 @@ Make sure you run:
 
 ```
 cd lama
-export TORCH_HOME=$(pwd) && export PYTHONPATH=.
+export TORCH_HOME=$(pwd) && export PYTHONPATH=$(pwd)
 ```
 
 Then download models for _perceptual loss_:
@@ -219,7 +220,7 @@ On the host machine:
 
     # Make shure you are in lama folder
     cd lama
-    export TORCH_HOME=$(pwd) && export PYTHONPATH=.
+    export TORCH_HOME=$(pwd) && export PYTHONPATH=$(pwd)
 
     # Download CelebA-HQ dataset
     # Download data256x256.zip from https://drive.google.com/drive/folders/11Vz0fqHS2rXDb5pprgTjpD7S2BAJhi1P
@@ -267,7 +268,7 @@ On the host machine:
 
     # Make shure you are in lama folder
     cd lama
-    export TORCH_HOME=$(pwd) && export PYTHONPATH=.
+    export TORCH_HOME=$(pwd) && export PYTHONPATH=$(pwd)
 
     # You need to prepare following image folders:
     $ ls my_dataset

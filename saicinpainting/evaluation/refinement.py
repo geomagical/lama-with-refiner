@@ -120,22 +120,26 @@ def _infer(
     """
     masked_image = image * (1 - mask)
     masked_image = torch.cat([masked_image, mask], dim=1)
+    scaler = GradScaler()
 
-    mask = mask.repeat(1,3,1,1)
-    if ref_lower_res is not None:
-        ref_lower_res = ref_lower_res.detach()
-    with torch.no_grad():
-        z1,z2 = forward_front(masked_image)
-    # Inference
-    mask = mask.to(devices[-1])
-    ekernel = torch.from_numpy(cv2.getStructuringElement(cv2.MORPH_ELLIPSE,(15,15)).astype(bool)).float()
-    ekernel = ekernel.to(devices[-1])
-    image = image.to(devices[-1])
-    z1, z2 = z1.detach().to(devices[0]), z2.detach().to(devices[0])
-    z1.requires_grad, z2.requires_grad = True, True
+    with autocast():
+
+        mask = mask.repeat(1,3,1,1)
+        if ref_lower_res is not None:
+            ref_lower_res = ref_lower_res.detach()
+        with torch.no_grad():
+                z1,z2 = forward_front(masked_image)
+        # Inference
+        mask = mask.to(devices[-1])
+        ekernel = torch.from_numpy(cv2.getStructuringElement(cv2.MORPH_ELLIPSE,(15,15)).astype(bool)).float()
+        ekernel = ekernel.to(devices[-1])
+        image = image.to(devices[-1])
+        with autocast(enabled=False):
+            z1, z2 = z1.detach().to(devices[0]), z2.detach().to(devices[0])
+            z1, z2 = z1.float(), z2.float()
+            z1.requires_grad, z2.requires_grad = True, True
 
     optimizer = Adam([z1,z2], lr=lr)
-    scaler = GradScaler()
 
     pbar = tqdm(range(n_iters), leave=False)
     for idi in pbar:

@@ -138,7 +138,7 @@ def _infer(
         z1.requires_grad, z2.requires_grad = True, True
 
         optimizer = Adam([z1,z2], lr=lr)
-    scaler = GradScaler()
+    # scaler = GradScaler()
 
     pbar = tqdm(range(n_iters), leave=False)
     for idi in pbar:
@@ -167,10 +167,14 @@ def _infer(
 
             loss = sum(losses.values())
         pbar.set_description("Refining scale {} using scale {} ...current loss: {:.4f}".format(scale_ind+1, scale_ind, loss.item()))
+        print("Refining scale {} using scale {} ...current loss: {:.4f}".format(scale_ind+1, scale_ind, loss.item()))
         if idi < n_iters - 1:
-            scaler.scale(loss).backward()
-            scaler.step(optimizer)
-            scaler.update()
+            # scaler.scale(loss).backward()
+            # scaler.step(optimizer)
+            # scaler.update()
+            loss.backward()
+            optimizer.step()
+
             del pred_downscaled
             del loss
             del pred

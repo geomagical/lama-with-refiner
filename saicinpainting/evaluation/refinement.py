@@ -59,7 +59,7 @@ def checkpoint_sequential(functions, segments, input, **kwargs):
     """
     # Hack for keyword-only parameter in a python 2.7-compliant way
     preserve = kwargs.pop('preserve_rng_state', True)
-    use_reentrant = False # kwargs.pop('use_reentrant', True)
+    use_reentrant = kwargs.pop('use_reentrant', True)
     if kwargs:
         raise ValueError("Unexpected keyword arguments: " + ",".join(arg for arg in kwargs))
 
@@ -209,8 +209,7 @@ def _infer(
         optimizer.zero_grad()
         input_feat = (z1,z2)
         for idd, forward_rear in enumerate(forward_rears):
-            import pdb; pdb.set_trace()
-            output_feat = checkpoint_sequential(forward_rear, nsegs, input_feat)
+            output_feat = checkpoint_sequential(forward_rear, nsegs, input_feat, use_reentrant=False)
             if idd < len(devices) - 1:
                 midz1, midz2 = output_feat
                 midz1, midz2 = midz1.to(devices[idd+1]), midz2.to(devices[idd+1])
